@@ -4,6 +4,8 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'dart:math';
 import 'dart:async';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models/stock_model.dart';
 import 'services/finance_service.dart';
@@ -42,7 +44,7 @@ class _StockChartPageState extends State<StockChartPage> {
   final Map<String, List<StockDataPoint>> _stockDataCache = {};
   int _visibleSlotsCount = 1;
   bool _isFavExpanded = false;
-  bool _isSearchExpanded = false;
+  bool _isSearchExpanded = true;
 
   final List<Stock?> _userFavorites = List.generate(6, (_) => null);
 
@@ -73,6 +75,28 @@ class _StockChartPageState extends State<StockChartPage> {
   void initState() {
     super.initState();
     _addLog('앱 시작. 검색 버튼을 눌러 종목을 추가하세요.');
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? favsJson = prefs.getString('user_favorites');
+    if (favsJson != null) {
+      final List<dynamic> decoded = json.decode(favsJson);
+      setState(() {
+        for (int i = 0; i < decoded.length && i < 6; i++) {
+          if (decoded[i] != null) {
+            _userFavorites[i] = Stock.fromJson(decoded[i]);
+          }
+        }
+      });
+    }
+  }
+
+  Future<void> _saveFavorites() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<Map<String, dynamic>?> encoded = _userFavorites.map((s) => s?.toJson()).toList();
+    await prefs.setString('user_favorites', json.encode(encoded));
   }
 
   void _addLog(String message) {
@@ -216,51 +240,52 @@ class _StockChartPageState extends State<StockChartPage> {
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 16, right: 16, top: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('즐겨찾기 종목 설정', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                onChanged: (v) {
-                  debounce?.cancel();
-                  debounce = Timer(const Duration(milliseconds: 500), () async {
-                    if (v.length < 2) return;
-                    setModalState(() => isSearching = true);
-                    final raw = await _financeService.searchStocks(v);
-                    setModalState(() {
-                      results = raw.map((q) => Stock(
-                        name: q['shortname'] ?? q['longname'] ?? q['symbol'],
-                        symbol: q['symbol'],
-                        type: q['quoteType'],
-                        exchange: q['exchDisp'],
-                        color: Colors.grey,
-                      )).toList();
-                      isSearching = false;
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('즐겨찾기 종목 설정', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  onChanged: (v) {
+                    debounce?.cancel();
+                    debounce = Timer(const Duration(milliseconds: 500), () async {
+                      if (v.length < 2) return;
+                      setModalState(() => isSearching = true);
+                      final raw = await _financeService.searchStocks(v);
+                      setModalState(() {
+                        results = raw.map((q) => Stock(
+                          name: q['shortname'] ?? q['longname'] ?? q['symbol'],
+                          symbol: q['symbol'],
+                          type: q['quoteType'],
+                          exchange: q['exchDisp'],
+                          color: Colors.grey,
+                        )).toList();
+                        isSearching = false;
+                      });
                     });
-                  });
-                },
-                decoration: const InputDecoration(hintText: '종목명 또는 심볼 검색', prefixIcon: Icon(Icons.search)),
-              ),
-              if (isSearching) const Padding(padding: EdgeInsets.all(8.0), child: CircularProgressIndicator()),
-              SizedBox(
-                height: 300,
-                child: ListView.builder(
+                  },
+                  decoration: const InputDecoration(hintText: '종목명 또는 심볼 검색', prefixIcon: Icon(Icons.search)),
+                ),
+                if (isSearching) const Padding(padding: EdgeInsets.all(8.0), child: CircularProgressIndicator()),
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
                   itemCount: results.length,
-                  itemBuilder: (context, i) => ListTile(
-                    title: Text(results[i].symbol),
-                    subtitle: Text(results[i].name),
-                    onTap: () {
+                  itemBuilder: (context, i) => _buildStockResultTile(
+                    results[i], 
+                    () {
                       setState(() => _userFavorites[favIndex] = results[i]);
+                      _saveFavorites();
                       parentSetModalState(() {});
                       Navigator.pop(context);
                     },
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -306,7 +331,7 @@ class _StockChartPageState extends State<StockChartPage> {
 
     // 메뉴에 들어올 때 기본적으로 접혀있도록 설정
     _isFavExpanded = false;
-    _isSearchExpanded = false;
+    _isSearchExpanded = true;
 
     showModalBottomSheet(
       context: context,
@@ -343,9 +368,9 @@ class _StockChartPageState extends State<StockChartPage> {
                     GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 3,
-                        childAspectRatio: 2.5,
+                        childAspectRatio: 1.6,
                         mainAxisSpacing: 8,
                         crossAxisSpacing: 8,
                       ),
@@ -364,6 +389,7 @@ class _StockChartPageState extends State<StockChartPage> {
                                   TextButton(
                                     onPressed: () {
                                       setState(() => _userFavorites[index] = null);
+                                      _saveFavorites();
                                       setModalState(() {});
                                       Navigator.pop(ctx);
                                     }, 
@@ -374,9 +400,24 @@ class _StockChartPageState extends State<StockChartPage> {
                             );
                           },
                           child: ActionChip(
-                            padding: EdgeInsets.zero,
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                             avatar: fav == null ? const Icon(Icons.add, size: 16) : null,
-                            label: Center(child: Text(fav?.symbol ?? '', style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)),
+                            label: fav == null 
+                              ? const SizedBox(width: double.infinity, child: Center(child: Text('')))
+                              : SizedBox(
+                                  width: double.infinity,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      _buildExchangeBadge(fav),
+                                      const SizedBox(height: 4),
+                                      _MarqueeText(
+                                        text: fav.name,
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                             onPressed: () {
                               if (fav == null) {
                                 _showFavoriteSearch(index, setModalState);
@@ -463,25 +504,9 @@ class _StockChartPageState extends State<StockChartPage> {
           ),
         ),
         if (_searchResultSlots[index].isNotEmpty)
-          ..._searchResultSlots[index].map((s) => ListTile(
-            dense: true,
-            title: Row(
-              children: [
-                _buildExchangeBadge(s),
-                const SizedBox(width: 8),
-                Text(s.symbol, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
-              ],
-            ),
-            subtitle: Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)),
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(s.type ?? '', style: const TextStyle(fontSize: 10)),
-                Text(s.exchange ?? '', style: const TextStyle(fontSize: 10, color: Colors.grey)),
-              ],
-            ),
-            onTap: () {
+          ..._searchResultSlots[index].map((s) => _buildStockResultTile(
+            s,
+            () {
               setState(() {
                 _selectedSlotStocks[index] = s;
                 _searchResultSlots[index] = [];
@@ -493,6 +518,29 @@ class _StockChartPageState extends State<StockChartPage> {
           )),
         const SizedBox(height: 12),
       ],
+    );
+  }
+
+  Widget _buildStockResultTile(Stock s, VoidCallback onTap) {
+    return ListTile(
+      dense: true,
+      title: Row(
+        children: [
+          _buildExchangeBadge(s),
+          const SizedBox(width: 8),
+          Text(s.symbol, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+        ],
+      ),
+      subtitle: Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(s.type ?? '', style: const TextStyle(fontSize: 10)),
+          Text(s.exchange ?? '', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+        ],
+      ),
+      onTap: onTap,
     );
   }
 
@@ -785,6 +833,70 @@ class _StockChartPageState extends State<StockChartPage> {
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(4), border: Border.all(color: color.withOpacity(0.5))),
       child: Text(text, style: TextStyle(fontSize: 9, color: color, fontWeight: FontWeight.bold)),
+    );
+  }
+}
+
+class _MarqueeText extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+  const _MarqueeText({required this.text, required this.style});
+
+  @override
+  State<_MarqueeText> createState() => _MarqueeTextState();
+}
+
+class _MarqueeTextState extends State<_MarqueeText> {
+  late ScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startScrolling());
+  }
+
+  void _startScrolling() async {
+    if (!_scrollController.hasClients) return;
+    
+    await Future.delayed(const Duration(seconds: 2));
+    
+    while (_scrollController.hasClients) {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      if (maxScroll > 0) {
+        await _scrollController.animateTo(
+          maxScroll,
+          duration: Duration(milliseconds: maxScroll.toInt() * 40),
+          curve: Curves.linear,
+        );
+        await Future.delayed(const Duration(seconds: 1));
+        if (_scrollController.hasClients) {
+          await _scrollController.animateTo(
+            0.0,
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOut,
+          );
+        }
+        await Future.delayed(const Duration(seconds: 2));
+      } else {
+        await Future.delayed(const Duration(seconds: 1));
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      controller: _scrollController,
+      scrollDirection: Axis.horizontal,
+      physics: const NeverScrollableScrollPhysics(),
+      child: Text(widget.text, style: widget.style, softWrap: false),
     );
   }
 }

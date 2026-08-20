@@ -14,6 +14,22 @@ class Stock {
     this.exchange,
     required this.color,
   });
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'symbol': symbol,
+    'type': type,
+    'exchange': exchange,
+    'color': color.value,
+  };
+
+  factory Stock.fromJson(Map<String, dynamic> json) => Stock(
+    name: json['name'],
+    symbol: json['symbol'],
+    type: json['type'],
+    exchange: json['exchange'],
+    color: Color(json['color']),
+  );
 }
 
 class StockDataPoint {
